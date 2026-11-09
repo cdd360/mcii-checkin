@@ -101,12 +101,19 @@ def do_login(page, email, password):
     # 回车提交(表单提交比点按钮更稳, 不依赖按钮文字)
     page.locator('input[type="password"]').first.press("Enter")
 
-    # 等签到按钮出现, 即登录成功
+    # 提交后等签到按钮出现; 登录成功后可能弹出"保持登录状态?"确认框,
+    # 必须先点"是"放行, 否则签到按钮一直出不来
     deadline = time.time() + 30
     while time.time() < deadline:
         if find_checkin_button(page) is not None:
             log("登录成功")
             return
+        keep = page.get_by_role("button", name="是", exact=True)
+        if keep.count() > 0 and keep.first.is_visible():
+            log("出现'保持登录状态?'确认框, 点击[是]")
+            keep.first.click()
+            page.wait_for_timeout(1500)
+            continue
         err = page.get_by_text(
             re.compile(r"密码错误|登录失败|账号不存在|验证码错误")
         )

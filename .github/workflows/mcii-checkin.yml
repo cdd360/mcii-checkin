@@ -1,0 +1,49 @@
+name: MCII 每日签到
+
+on:
+  schedule:
+    # 每天北京时间 00:30 运行 (UTC 16:30)
+    - cron: '30 16 * * *'
+  workflow_dispatch:  # 允许在 Actions 页面手动点 Run workflow 测试
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcii-checkin
+  cancel-in-progress: false
+
+jobs:
+  checkin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 安装 Playwright
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+
+      - name: 自动签到
+        env:
+          MCII_EMAIL: ${{ secrets.MCII_EMAIL }}
+          MCII_PASSWORD: ${{ secrets.MCII_PASSWORD }}
+        run: python checkin.py
+
+      - name: 保存截图
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkin-screenshot
+          path: |
+            checkin.png
+            error.png
+          if-no-files-found: ignore
+          retention-days: 7

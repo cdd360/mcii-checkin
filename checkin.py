@@ -69,10 +69,19 @@ def dismiss_tour_if_present(page):
 
 
 def wait_for_checkin_button(page, timeout=30):
-    """等签到按钮出现, 期间新手引导弹出来就先跳过. 超时返回 None."""
+    """等签到按钮出现, 期间新手引导弹出来就先跳过. 超时返回 None.
+
+    注意: 引导启动时会把页面强制跳回 /nodes(代码里写死的),
+    所以跳过引导后必须再回 /account 一次, 否则一直在 /nodes 上等,
+    签到按钮永远出不来.
+    """
     deadline = time.time() + timeout
     while time.time() < deadline:
-        dismiss_tour_if_present(page)
+        if dismiss_tour_if_present(page):
+            log("引导已跳过, 回到我的账号页")
+            page.goto(ACCOUNT_URL, wait_until="domcontentloaded")
+            page.wait_for_timeout(2000)
+            continue
         btn = find_checkin_button(page)
         if btn is not None:
             return btn

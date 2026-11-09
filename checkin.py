@@ -6,8 +6,11 @@ MCII 节点共享 (https://proxy.mcii.cc) 每日自动签到.
 流程:
     1. 打开 https://proxy.mcii.cc/nodes
     2. 未登录时点右上角"登录", 填邮箱 + 密码登录
-    3. 点"签到并激活订阅"按钮
+       (登录后会弹"保持登录状态?"确认框, 点"是"; 再弹 8 步新手引导, 点跳过)
+    3. 跳到 https://proxy.mcii.cc/account (我的账号, 概览页),
+       点"签到并激活订阅"按钮
        (当天已签到时按钮叫"已签到 · 激活续期", 点了同样续期)
+       注意: 签到按钮不在 /nodes 页上, 只在 /account 与 /subscriptions 页有
     4. 如弹出二次确认, 点确认
     5. 截图保存为 checkin.png
 
@@ -32,6 +35,7 @@ from datetime import datetime
 from playwright.sync_api import sync_playwright
 
 BASE_URL = "https://proxy.mcii.cc/nodes"
+ACCOUNT_URL = "https://proxy.mcii.cc/account"
 CHECKIN_PNG = "checkin.png"
 ERROR_PNG = "error.png"
 
@@ -49,6 +53,30 @@ def find_checkin_button(page):
     btn = page.get_by_role("button", name=re.compile(r"签到"))
     if btn.count() > 0:
         return btn.first
+    return None
+
+
+def dismiss_tour_if_present(page):
+    """新手引导(8 步)每次全新登录都会弹出来, 点跳过关掉. 返回是否点过."""
+    for name in ("跳过教程", "跳过"):
+        btn = page.get_by_role("button", name=name, exact=True)
+        if btn.count() > 0 and btn.first.is_visible():
+            log("出现新手引导, 点击跳过")
+            btn.first.click()
+            page.wait_for_timeout(1000)
+            return True
+    return False
+
+
+def wait_for_checkin_button(page, timeout=30):
+    """等签到按钮出现, 期间新手引导弹出来就先跳过. 超时返回 None."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        dismiss_tour_if_present(page)
+        btn = find_checkin_button(page)
+        if btn is not None:
+            return btn
+        time.sleep(1)
     return None
 
 
@@ -101,13 +129,11 @@ def do_login(page, email, password):
     # 回车提交(表单提交比点按钮更稳, 不依赖按钮文字)
     page.locator('input[type="password"]').first.press("Enter")
 
-    # 提交后等签到按钮出现; 登录成功后可能弹出"保持登录状态?"确认框,
-    # 必须先点"是"放行, 否则签到按钮一直出不来
+    # 提交后等登录完成: 登录成功后可能弹出"保持登录状态?"确认框,
+    # 必须先点"是"放行; 再等侧边栏"我的账号"出现, 即已登录.
+    # 注意: 签到按钮不在 /nodes 页上, 这里不等它.
     deadline = time.time() + 30
     while time.time() < deadline:
-        if find_checkin_button(page) is not None:
-            log("登录成功")
-            return
         keep = page.get_by_role("button", name="是", exact=True)
         if keep.count() > 0 and keep.first.is_visible():
             log("出现'保持登录状态?'确认框, 点击[是]")
@@ -119,8 +145,12 @@ def do_login(page, email, password):
         )
         if err.count() > 0 and err.first.is_visible():
             raise RuntimeError(f"登录失败: {err.first.inner_text().strip()}")
+        nav = page.get_by_text("我的账号", exact=True)
+        if nav.count() > 0 and nav.first.is_visible():
+            log("登录成功")
+            return
         time.sleep(1)
-    raise RuntimeError("登录后 30 秒内没出现签到按钮, 可能登录失败或页面变了")
+    raise RuntimeError("登录后 30 秒内未完成登录, 可能密码错了或页面变了")
 
 
 def click_confirm_if_present(page):
@@ -178,11 +208,17 @@ def main():
             btn = find_checkin_button(page)
             if btn is None:
                 do_login(page, email, password)
-                btn = find_checkin_button(page)
-                if btn is None:
-                    raise RuntimeError("登录后仍找不到签到按钮")
             else:
                 log("已登录, 直接签到")
+
+            # 签到按钮不在 /nodes 页上: 它只在"我的账号"(/account, 概览页)
+            # 和"我的订阅"页内联渲染, 所以登录后跳到 /account 再找
+            log(f"打开 {ACCOUNT_URL}")
+            page.goto(ACCOUNT_URL, wait_until="domcontentloaded")
+            page.wait_for_timeout(2000)
+            btn = wait_for_checkin_button(page, timeout=30)
+            if btn is None:
+                raise RuntimeError("我的账号页 30 秒内没出现签到按钮")
 
             label = (btn.inner_text() or "").strip()
             log(f"点击签到按钮[{label}]")
